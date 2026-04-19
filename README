@@ -1,0 +1,13 @@
+# Desktoper
+A simple QT6/C++ utility for launching applications on specific X11 workspaces (virtual desktops) using `wmctrl`
+
+## Features
+Launch applications on any workspace (virtual desktop: gsettings set org.gnome.desktop.wm.preferences num-workspaces)
+
+### Prerequisites
+- Debian 12/Ubuntu 22.04
+- `wmctrl` command-line utility
+
+#### Install Dependencies
+sudo apt update
+sudo apt install wmctrl

@@ -1,0 +1,128 @@
+name: build app
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os:
+          - ubuntu-22.04
+        build_type:
+          - Release
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qt6-base-dev \
+          qt6-base-dev-tools \
+          build-essential \
+          cmake \
+          ninja-build \
+          libgl1-mesa-dev \
+          libglu1-mesa-dev \
+          libxcb-util-dev \
+          libxkbcommon-x11-dev
+
+    - name: configure CMake
+      run: |
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+          -DCMAKE_CXX_STANDARD=17 \
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+    - name: build
+      run: cmake --build build --config ${{ matrix.build_type }} --parallel $(nproc)
+
+    - name: test (optional)
+      run: |
+        if [ -f build/desktoper ]; then
+          echo "✅ Build successful: ${{ matrix.os }} - ${{ matrix.build_type }}"
+          file build/desktoper
+          ldd build/desktoper | head -10
+        fi
+
+    - name: upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: desktoper-${{ matrix.os }}-${{ matrix.build_type }}
+        path: |
+          build/desktoper
+          build/compile_commands.json
+        if-no-files-found: error
+        retention-days: 7
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+
+    steps:
+    - name: checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: get latest tag
+      id: get_tag
+      run: |
+        git fetch --tags
+        latest_tag=$(git tag --list "v*" --sort=-version:refname | head -n 1)
+
+        if [ -n "$latest_tag" ]; then
+          echo "✅ tag found: $latest_tag"
+          echo "tag=$latest_tag" >> $GITHUB_OUTPUT
+        else
+          echo "❌ error: tag not found"
+          exit 1
+        fi
+
+    - name: prepare release files
+      run: |
+        mkdir -p release
+
+        if [ -f "artifacts/desktoper-ubuntu-22.04-Release/desktoper" ]; then
+          cp artifacts/desktoper-ubuntu-22.04-Release/desktoper release/desktoper
+          cp artifacts/desktoper-ubuntu-22.04-Release/compile_commands.json release/compile_commands.json
+          echo "✅ files copied"
+        else
+          echo "❌ error: files not found"
+          exit 1
+        fi
+
+        echo "📁 Release files:"
+        ls -la release/
+
+    - name: create release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.get_tag.outputs.tag }}
+        name: Release ${{ steps.get_tag.outputs.tag }}
+        files: |
+          release/desktoper
+          release/compile_commands.json
+          draft: false
+          prerelease: false
+          generate_release_notes: true
